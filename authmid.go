@@ -66,6 +66,10 @@ func (a *auther) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 var errNilHeader = errors.New("expecting a non-nil header")
 
+type ExcludeMethodAndPather interface {
+	ExcludeMethodAndPath() bool
+}
+
 func Checker(vf Authenticator) func(*http.Request) error {
 	return func(req *http.Request) error {
 		if req == nil || len(req.Header) == 0 {
@@ -88,9 +92,14 @@ func Checker(vf Authenticator) func(*http.Request) error {
 			return err
 		}
 		mac := hmac.New(sha256.New, apiSecret)
-		urlPath := rreq.URL.Path
-		if q := req.URL.Query(); len(q) > 0 {
-			urlPath += "?" + q.Encode()
+		inputs := []string{string(body)}
+		if ex, ok := vf.(ExcludeMethodAndPather); !ok || !ex.ExcludeMethodAndPath() {
+			urlPath := rreq.URL.Path
+			if q := req.URL.Query(); len(q) > 0 {
+				urlPath += "?" + q.Encode()
+			}
+			// Otherwise prepend req.Method and urlPath
+			inputs = append([]string{req.Method, urlPath}, inputs...)
 		}
 		headerValues, warnings, err := vf.HeaderValues(req.Header)
 		if err != nil {
@@ -100,7 +109,7 @@ func Checker(vf Authenticator) func(*http.Request) error {
 			// TODO: Figure out if to send this component in the
 			// response writer and when should the write be performed?
 		}
-		sigInput := append(headerValues, req.Method, urlPath, string(body))
+		sigInput := append(headerValues, inputs...)
 		_, _ = io.WriteString(mac, strings.Join(sigInput, ""))
 		gotSignature := fmt.Sprintf("%x", mac.Sum(nil))
 		if gotSignature != wantSignature {
