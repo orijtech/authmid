@@ -26,6 +26,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -84,7 +85,16 @@ func TestChecker(t *testing.T) {
 	}
 }
 
-type sampleAuthChecker struct{}
+type sampleAuthChecker struct {
+	mu sync.Mutex
+	authmid.Backend
+}
+
+func (ca *sampleAuthChecker) SetBackend(backend authmid.Backend) {
+	ca.mu.Lock()
+	ca.Backend = backend
+	ca.mu.Unlock()
+}
 
 var _ authmid.Authenticator = (*sampleAuthChecker)(nil)
 

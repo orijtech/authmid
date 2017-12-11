@@ -26,13 +26,34 @@ import (
 )
 
 type Authenticator interface {
-	LookupSecret(apiKey string) ([]byte, error)
+	ReadOnlyBackend
+	HTTPAuthMiddleware
+}
+
+type HTTPAuthMiddleware interface {
 	HeaderValues(hdr http.Header) (values, warnings []string, err error)
 	LookupAPIKey(hdr http.Header) (string, error)
 	Signature(hdr http.Header) (string, error)
 }
 
+type ReadOnlyBackend interface {
+	LookupSecret(apiKey string) ([]byte, error)
+}
+
+type WriteBackend interface {
+	UpsertSecret(apiKey, apiSecret string) error
+	DeleteAPIKey(apiKey string) error
+}
+
+type Backend interface {
+	ReadOnlyBackend
+	WriteBackend
+	Close() error
+}
+
 var (
+	ErrNoSuchAPIKey      = errors.New("no such apiKey found")
+	ErrEmptyTableName    = errors.New("expecting a non-empty table name")
 	ErrSignatureMismatch = errors.New("invalid/mismatched signatures")
 )
 

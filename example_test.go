@@ -21,8 +21,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 
 	"github.com/orijtech/authmid"
+	"github.com/orijtech/authmid/backend/redis"
 )
 
 func Example_middleware() {
@@ -48,4 +50,57 @@ func Example_inPlainServer() {
 	http.Handle("/", authmid.Middleware(&sampleAuthChecker{}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "Authenticated pong!")
 	})))
+}
+
+func Example_backendForAuthentication() {
+	backend, err := redis.New("keys", "redis://localhost:6379")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ac := &apiChecker{
+		backend: backend,
+		next: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprintf(w, "Authenticated pong!")
+		}),
+		hdrKey: "DEMO-ACCESS-APIKEY",
+	}
+	http.Handle("/ping", ac)
+
+	http.HandleFunc("/reg", func(w http.ResponseWriter, r *http.Request) {
+		qv := r.URL.Query()
+		key, secret := qv.Get("key"), qv.Get("secret")
+		if err := backend.UpsertSecret(key, secret); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	})
+
+	addr := ":8777"
+	log.Printf("Serving on: %s", addr)
+	if err := http.ListenAndServe(addr, nil); err != nil {
+		log.Fatal(err)
+	}
+}
+
+type apiChecker struct {
+	backend authmid.Backend
+	next    http.Handler
+	hdrKey  string
+}
+
+func (ac *apiChecker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	apiKey := r.Header.Get(ac.hdrKey)
+	if strings.TrimSpace(apiKey) == "" {
+		http.Error(w, "expecting a non-blank API Key", http.StatusBadRequest)
+		return
+	}
+	secret, err := ac.backend.LookupSecret(apiKey)
+	if err != nil {
+		log.Printf("looking up secret: err: %v", err)
+		http.Error(w, "failed to lookup the secret", http.StatusBadRequest)
+		return
+	}
+	log.Printf("secret: %s\n", secret)
+	ac.next.ServeHTTP(w, r)
 }
